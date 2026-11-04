@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MovieVerse Bot — Updated 17-Char Alphanumeric Code + Port Binding for Render
+MovieVerse Bot — Fixed Port Binding & Non-Blocking Async Web Server for Render
 """
 
 import asyncio
@@ -40,14 +40,14 @@ from aiohttp import web
 # =========================================================================
 BOT_TOKEN = os.environ.get(
     "BOT_TOKEN",
-    "8751100050:AAF4Vunr7OT-H0WZySy4p6UH16Cyt693gsI",  # ⚠ REVOKE THIS
+    "8751100050:AAF4Vunr7OT-H0WZySy4p6UH16Cyt693gsI",
 )
 ADMIN_CHAT_ID = int(os.environ.get("ADMIN_CHAT_ID", "7718164345"))
 
 DB_PATH = os.path.join(os.getcwd(), "movieverse.db")
 
 AUTO_DELETE_SECONDS = 1200
-BACKUP_INTERVAL_SECONDS = 60  # ⭐ 60 সেকেন্ড ব্যাকআপ
+BACKUP_INTERVAL_SECONDS = 60
 ANTI_SPAM_COOLDOWN = 1.0
 
 # ⭐ YOUR MINI APP DEEP LINK
@@ -179,7 +179,6 @@ def truncate(text: str, n: int = 40) -> str:
 def esc(text) -> str:
     return html.escape(str(text or ""))
 
-# ⭐ GENERATE 17-CHAR ALPHANUMERIC CODE (A-Z, a-z, 0-9)
 async def unique_code() -> str:
     chars = string.ascii_letters + string.digits
     while True:
@@ -1400,22 +1399,25 @@ async def backup_worker():
             await asyncio.sleep(5)
 
 # =========================================================================
-# WEB SERVER FOR RENDER PORT BINDING
+# WEB SERVER FOR RENDER PORT BINDING (FIXED NON-BLOCKING)
 # =========================================================================
 async def handle_ping(request):
     return web.Response(text="MovieVerse Bot is running!")
 
 async def start_web_server():
-    app = web.Application()
-    app.router.add_get("/", handle_ping)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    
-    # Render assigns port dynamically via environment variable PORT
-    port = int(os.environ.get("PORT", 10000))
-    site = web.TCPSite(runner, "0.0.0.0", port)
-    await site.start()
-    logger.info(f"Web server started and bound to port {port}")
+    try:
+        app = web.Application()
+        app.router.add_get("/", handle_ping)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        
+        # Render assigns port dynamically via environment variable PORT
+        port = int(os.environ.get("PORT", 10000))
+        site = web.TCPSite(runner, "0.0.0.0", port)
+        await site.start()
+        logger.info(f"Web server started successfully and bound to port {port}")
+    except Exception as e:
+        logger.error(f"Web server error: {e}")
 
 # =========================================================================
 # FALLBACK
@@ -1443,8 +1445,8 @@ async def main():
         global _backup_task
         _backup_task = asyncio.create_task(backup_worker())
 
-        # ⭐ Start the Web Server so Render detects an open port
-        await start_web_server()
+        # ⭐ FIX: Non-blocking web server task creation
+        asyncio.create_task(start_web_server())
 
         me = await bot.get_me()
         logger.info(f"Logged in as @{me.username} (id={me.id})")
