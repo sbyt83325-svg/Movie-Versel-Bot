@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MovieVerse Bot — Updated 17-Char Alphanumeric Code
+MovieVerse Bot — Updated 17-Char Alphanumeric Code + Port Binding for Render
 """
 
 import asyncio
@@ -31,6 +31,9 @@ from aiogram.types import (
 from aiogram.exceptions import (
     TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter,
 )
+
+# ⭐ Import for web server port binding on Render
+from aiohttp import web
 
 # =========================================================================
 # CONFIG
@@ -562,7 +565,6 @@ async def _show_profile(chat_id, user_id, edit_call=None):
     codes_txt = ""
     if posts:
         codes_txt = "\n📄 <b>YOUR CONTENT:</b>\n"
-        # ⭐ We show the title and views, but NOT the code
         for p in posts[:10]:
             codes_txt += f"  {esc(truncate(p['title'], 30))} — 👁 {p.get('views', 0)}\n"
     else:
@@ -693,7 +695,6 @@ async def cb_category(call: CallbackQuery):
     if not posts:
         await call.answer("No posts yet.", show_alert=True)
         return
-    # ⭐ Title only, no code
     kb = [[InlineKeyboardButton(text=f"🎬 {truncate(p['title'], 40)}", callback_data=f"view:{p['code']}")] for p in posts]
     kb.append([InlineKeyboardButton(text="🔙 BACK", callback_data="browse")])
     await safe_edit(call, f"{CATEGORY_NAMES[cat]} — <b>LATEST POSTS</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
@@ -710,7 +711,6 @@ async def search_handler(message: Message, state: FSMContext):
     if not q:
         await message.answer("Send a valid query.", reply_markup=back_kb("main"))
         return
-    # ⭐ Only search by title now
     rows = await fetchall("SELECT * FROM posts WHERE published=1 AND deleted=0 AND title LIKE ? ORDER BY created_at DESC LIMIT 20", (f"%{q}%",))
     if not rows:
         await message.answer("❌ No results.", reply_markup=back_kb("main"))
@@ -731,7 +731,6 @@ async def show_post_card(chat_id: int, code: str):
     if not post:
         await bot.send_message(chat_id, "⚠️ Post not found.")
         return
-    # ⭐ DO NOT SHOW CODE HERE
     text = f"🎬 <b>{esc(post['title'])}</b>\n\n👇 Watch the ad to unlock:"
     kb = post_card_kb(code)
     if post.get("thumbnail_id"):
@@ -762,7 +761,7 @@ async def cb_star(call: CallbackQuery):
     else: await call.answer("❌ Failed to save rating.", show_alert=True)
 
 # =========================================================================
-# ⭐ MINI APP CONFIRM & TEXT HANDLER
+# MINI APP CONFIRM & TEXT HANDLER
 # =========================================================================
 @router.message(F.web_app_data)
 async def handle_web_app_data(message: Message):
@@ -803,10 +802,8 @@ async def handle_web_app_data(message: Message):
     await asyncio.sleep(0.4)
     await _deliver(message.chat.id, code, message.from_user.id)
 
-# ⭐ This handles the 17-character code pasted by the user
 @router.message(F.text.regexp(r"^[A-Za-z0-9]{17}$"))
 async def handle_pasted_code(message: Message, state: FSMContext):
-    # Ignore if user is in another state (like uploading)
     current_state = await state.get_state()
     if current_state is not None:
         return
@@ -817,7 +814,6 @@ async def handle_pasted_code(message: Message, state: FSMContext):
         await message.answer("❌ Invalid code or video deleted.")
         return
     
-    # ⭐ DO NOT ECHO THE CODE BACK
     await message.answer("✅ <b>Code Verified!</b> Sending your file...")
     await _deliver(message.chat.id, code, message.from_user.id)
 
@@ -930,7 +926,6 @@ async def recv_user_thumb(message: Message, state: FSMContext):
     username = await get_bot_username()
     link = f"https://t.me/{username}?start=GET_{code}"
     await state.clear()
-    # ⭐ DO NOT SHOW THE CODE, only the link
     await message.answer(f"✅ <b>UPLOAD COMPLETE!</b>\n\n📌 Title: <b>{esc(title)}</b>\n🔗 Share: <code>{link}</code>", reply_markup=back_kb("main"))
 
 # =========================================================================
@@ -958,7 +953,6 @@ async def cb_myedit(call: CallbackQuery):
         [InlineKeyboardButton(text="🗑 DELETE", callback_data=f"mydel:{code}")],
         [InlineKeyboardButton(text="🔙 BACK", callback_data="my_uploads")],
     ])
-    # ⭐ DO NOT SHOW THE CODE
     await safe_edit(call, f"📄 <b>{esc(post['title'])}</b>\n👁 Views: {post['views']}", reply_markup=kb)
 
 @router.callback_query(F.data.startswith("mydel:"))
@@ -1193,7 +1187,6 @@ async def cb_pub_confirm(call: CallbackQuery, state: FSMContext):
             logger.error(f"publish {ch}: {e}")
             
     await state.clear()
-    # ⭐ DO NOT SHOW THE CODE, only the link
     await safe_edit(call, f"✅ <b>PUBLISHED!</b>\n\n🔗 Link: <code>{link}</code>\n\nPosted to: {', '.join(posted) if posted else '❌ none'}", reply_markup=back_kb("admin_panel"))
 
 @router.callback_query(F.data == "admin_restore", F.from_user.id == ADMIN_CHAT_ID)
@@ -1407,6 +1400,24 @@ async def backup_worker():
             await asyncio.sleep(5)
 
 # =========================================================================
+# WEB SERVER FOR RENDER PORT BINDING
+# =========================================================================
+async def handle_ping(request):
+    return web.Response(text="MovieVerse Bot is running!")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    
+    # Render assigns port dynamically via environment variable PORT
+    port = int(os.environ.get("PORT", 10000))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logger.info(f"Web server started and bound to port {port}")
+
+# =========================================================================
 # FALLBACK
 # =========================================================================
 @router.message()
@@ -1431,6 +1442,9 @@ async def main():
 
         global _backup_task
         _backup_task = asyncio.create_task(backup_worker())
+
+        # ⭐ Start the Web Server so Render detects an open port
+        await start_web_server()
 
         me = await bot.get_me()
         logger.info(f"Logged in as @{me.username} (id={me.id})")
