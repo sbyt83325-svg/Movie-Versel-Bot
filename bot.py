@@ -6,32 +6,37 @@ from datetime import datetime
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from flask import Flask
-from threading import Thread
+from flask import Flask, request
 
 # --- কনফিগারেশন ---
 TOKEN = "8751100050:AAF4Vunr7OT-H0WZySy4p6UH16Cyt693gsI"
 ADMIN_ID = 7718164345  # আপনার অ্যাডমিন চ্যাট আইডি
 
+# রেন্ডারে আপনার ওয়েব সার্ভিসের মূল লিংকটি এখানে বসাবেন (যেমন: https://your-app-name.onrender.com)
+RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL", "https://movieversel-bot.onrender.com")
+
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# --- ফ্লাস্ক ওয়েব সার্ভার (Render Web Service কে ২৪/৭ সচল রাখার জন্য) ---
-app = Flask('')
+# --- ফ্লাস্ক ওয়েব সার্ভার ও ওয়েবহুক রিসিভার ---
+app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🤖 Telegram Smart Search & Terabox Bot is running 24/7 as a Web Service!"
+    return "🤖 Master Telegram Search & Terabox Bot is running 24/7 with Webhook!"
+
+@app.route(f'/{TOKEN}', methods=['POST'])
+def webhook_listener():
+    if request.headers.get('content-type') == 'application/json':
+        json_data = request.get_json()
+        update = types.Update.model_validate(json_data, context={"bot": bot})
+        asyncio.run(dp.feed_update(bot, update))
+        return 'OK', 200
+    return 'Forbidden', 403
 
 def run_flask():
-    # Render-এর ওয়েব সার্ভিসের জন্য ডায়নামিক পোর্ট বাইন্ডিং
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
-
-def keep_alive():
-    t = Thread(target=run_flask)
-    t.daemon = True
-    t.start()
 
 # --- ডাটাবেজ সেটআপ ---
 DB_NAME = "bot_database.db"
@@ -58,7 +63,7 @@ async def database_backup_loop():
     last_backup_file = None
     
     while True:
-        await asyncio.sleep(60)  # প্রতি ৬০ সেকেন্ড পর পর
+        await asyncio.sleep(60)  # প্রতি ১ মিনিট পর পর
         try:
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             backup_filename = f"backup_{timestamp}.db"
@@ -185,16 +190,21 @@ async def handle_auto_index_and_search(message: Message):
     except Exception as e:
         print(f"Search/Index Error: {e}")
 
-# --- মূল রানিং ফাংশন ---
-async def main():
-    # ফ্লাস্ক ব্যাকগ্রাউন্ড সার্ভার চালু করা যাতে রেন্ডার ওয়েব সার্ভিস পোর্ট পায়
-    keep_alive()
-    
-    # ব্যাকআপ লুপ চালু করা
+# --- ব্যাকগ্রাউন্ড টাস্ক ইনিশিয়ালাইজার ---
+async def on_startup():
+    webhook_url = f"{RENDER_EXTERNAL_URL}/{TOKEN}"
+    await bot.set_webhook(webhook_url)
+    print(f"Webhook set to: {webhook_url}")
+    # ব্যাকআপ লুপ ব্যাকগ্রাউন্ডে চালু করা
     asyncio.create_task(database_backup_loop())
-    
-    print("🚀 Master Web Service Bot is running successfully 24/7...")
-    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # ফ্লাস্ক সার্ভার ব্যাকগ্রাউন্ড থ্রেডে রান করা
+    from threading import Thread
+    t = Thread(target=run_flask)
+    t.daemon = True
+    t.start()
+
+    # স্টার্টআপ ফাংশন ও ইভেন্ট লুপ রান করা
+    asyncio.run(on_startup())
+    print("🚀 Master Webhook Bot is running 24/7 smoothly...")
