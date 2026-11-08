@@ -9,19 +9,19 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from flask import Flask
 from threading import Thread
 
-# --- কনফিগারেশন (আপনার দেওয়া তথ্য অনুযায়ী সেট করা) ---
+# --- কনফিগারেশন ---
 TOKEN = "8751100050:AAF4Vunr7OT-H0WZySy4p6UH16Cyt693gsI"
-ADMIN_ID = 8806711354  # আপনার টেলিগ্রাম চ্যাট আইডি
+ADMIN_ID = 7718164345  # আপনার নতুন অ্যাডমিন চ্যাট আইডি
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# --- ফ্লাস্ক সার্ভার (Render Web Service কে সচল রাখার জন্য) ---
+# --- ফ্লাস্ক সার্ভার (Render Web Service কে ২৪/৭ সচল রাখার জন্য) ---
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "🤖 Telegram Smart Search & Terabox Bot is running 24/7 on Render!"
+    return "🤖 Auto-Indexing Telegram Search & Terabox Bot is running 24/7 on Render!"
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
@@ -32,7 +32,7 @@ def keep_alive():
     t.daemon = True
     t.start()
 
-# --- ডাটাবেজ সেটআপ ও ইনিশিয়ালাইজেশন ---
+# --- ডাটাবেজ সেটআপ ---
 DB_NAME = "bot_database.db"
 
 def init_db():
@@ -51,21 +51,20 @@ def init_db():
 
 init_db()
 
-# --- প্রতি ১ মিনিট পর পর অটো ডাটাবেজ ব্যাকআপ ও পুরনো ফাইল ডিলিট সিস্টেম ---
+# --- ১ মিনিট পর পর অটো ডাটাবেজ ব্যাকআপ ও পুরনো ফাইল ডিলিট সিস্টেম ---
 async def database_backup_loop():
-    await asyncio.sleep(15)  # বট চালু হওয়ার ১৫ সেকেন্ড পর লুপ শুরু হবে
+    await asyncio.sleep(15)
     last_backup_file = None
     
     while True:
-        await asyncio.sleep(60)  # ঠিক প্রতি ১ মিনিট (৬০ সেকেন্ড) পর পর রান হবে
+        await asyncio.sleep(60)  # প্রতি ৬০ সেকেন্ড পর পর
         try:
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             backup_filename = f"backup_{timestamp}.db"
             
-            # ডাটাবেজের একটি সেফ কপি তৈরি
             shutil.copyfile(DB_NAME, backup_filename)
             
-            # আপনার টেলিগ্রাম চ্যাট আইডিতে ব্যাকআপ ফাইল পাঠানো
+            # আপনার নতুন অ্যাডমিন আইডিতে ব্যাকআপ পাঠানো
             with open(backup_filename, 'rb') as f:
                 await bot.send_document(
                     chat_id=ADMIN_ID,
@@ -73,71 +72,41 @@ async def database_backup_loop():
                     caption=(
                         f"⚙️ **অটো ডাটাবেজ ব্যাকআপ রিপোর্ট:**\n"
                         f"🕒 সময়: `{timestamp}`\n"
-                        f"✅ ডাটাবেজ ব্যাকআপ সফলভাবে সম্পন্ন হয়েছে এবং পাঠানো হয়েছে।"
+                        f"✅ ডাটাবেজ সফলভাবে ব্যাকআপ হয়ে আপনার কাছে এসেছে।"
                     ),
                     parse_mode="Markdown"
                 )
             
-            # স্টোরেজ খালি রাখতে ঠিক ১ মিনিট আগের পুরনো ব্যাকআপ ফাইলটি ডিলিট করে দেওয়া
+            # আগের ব্যাকআপ ফাইলটি ডিলিট করে স্টোরেজ ক্লিন রাখা
             if last_backup_file and os.path.exists(last_backup_file):
                 os.remove(last_backup_file)
-                print(f"[Old Backup Cleaned]: {last_backup_file}")
                 
             last_backup_file = backup_filename
-            print(f"[Backup Success]: {backup_filename} sent to Admin ID: {ADMIN_ID}")
+            print(f"[Backup Success]: Sent to Admin ID: {ADMIN_ID}")
             
         except Exception as e:
             print(f"[Backup Error]: {e}")
 
-# --- স্টার্ট কমান্ড হ্যান্ডলার ---
+# --- স্টার্ট কমান্ড ---
 @dp.message(Command("start"))
 async def start_handler(message: Message):
     welcome_text = (
-        "👋 **স্বাগতম! আপনার পার্সোনাল স্মার্ট সার্চ ও টেরাবক্স ডাউনলোডার বটে।**\n\n"
-        "🔍 **কীভাবে সার্চ করবেন:** যেকোনো মুভি, চ্যানেল বা ফাইলের নাম লিখে পাঠান, আমি ডাটাবেজ থেকে খুঁজে দেবো।\n"
-        "📥 **টেরাবক্স লিংক:** যেকোনো Terabox লিংক পাঠালে সাথে সাথে ভিডিও দেখার এবং ডাউনলোডের সুন্দর বাটন চলে আসবে।\n\n"
-        "🛠 *বটটি ২৪/৭ রেন্ডারে সচল রয়েছে এবং প্রতি ১ মিনিট পর পর অটো ব্যাকআপ সিস্টেম সক্রিয় আছে।*"
+        "🤖 **স্বাগতম! এটি একটি অটো-ইনডেক্সিং স্মার্ট সার্চ ও টেরাবক্স বট।**\n\n"
+        "🔍 **অটো সার্চ:** আপনি যেকোনো মুভি, সফটওয়্যার বা ফাইলের নাম লিখে পাঠান—বট নিজে থেকেই ডাটাবেজ থেকে সেরা রেজাল্ট খুঁজে বের করবে!\n"
+        "📥 **টেরাবক্স লিংক:** যেকোনো Terabox লিংক পাঠালে সাথে সাথে অনলাইন দেখার ও ডাউনলোডের বাটন পেয়ে যাবেন।\n"
+        "⚙️ *বটটি নিজে নিজে ডাটা ইনডেক্স করে এবং ২৪/৭ রেন্ডারে সচল থাকে।*"
     )
     await message.answer(welcome_text, parse_mode="Markdown")
 
-# --- নতুন ডাটা যোগ করার অ্যাডমিন কমান্ড (/add শিরোনাম | লিংক) ---
-@dp.message(Command("add"))
-async def add_file_handler(message: Message):
-    if message.from_user.id != ADMIN_ID:
-        await message.reply("⚠️ এই কমান্ডটি শুধুমাত্র অ্যাডমিনের জন্য!")
-        return
-    
-    try:
-        # ফরম্যাট: /add মুভির নাম | https://link.com
-        command_text = message.text.replace("/add", "").strip()
-        if "|" not in command_text:
-            await message.reply("❌ ভুল ফরম্যাট! সঠিক নিয়মে লিখুন:\n`/add মুভির নাম | লিংক`", parse_mode="Markdown")
-            return
-            
-        title, link = command_text.split("|", 1)
-        title = title.strip()
-        link = link.strip()
-        
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        cursor.execute("INSERT INTO files (title, file_link, category) VALUES (?, ?, ?)", (title, link, "General"))
-        conn.commit()
-        conn.close()
-        
-        await message.reply(f"✅ সফলভাবে ডাটাবেজে যুক্ত করা হয়েছে!\n\n📌 **টাইটেল:** {title}\n🔗 **লিংক:** {link}", parse_mode="Markdown")
-    except Exception as e:
-        await message.reply(f"❌ ত্রুটি ঘটেছে: {e}")
-
-# --- মূল চ্যাট, সার্চ ও টেরাবক্স প্রসেসর হ্যান্ডলার ---
+# --- অটো-ইনডেক্সিং এবং সার্চ ইঞ্জিন হ্যান্ডলার ---
 @dp.message(F.text)
-async def handle_message(message: Message):
+async def handle_auto_index_and_search(message: Message):
     text = message.text.strip()
     
-    # ১. টেরাবক্স লিংক ডিটেক্ট ও সুন্দর প্রিভিউ তৈরি
+    # ১. টেরাবক্স লিংক প্রসেসর
     if "terabox" in text.lower() or "teraboxapp" in text.lower():
-        processing_msg = await message.reply("⏳ টেরাবক্স লিংক প্রসেস করা হচ্ছে, দয়া করে অপেক্ষা করুন...")
+        processing_msg = await message.reply("⏳ টেরাবক্স লিংক প্রসেস করা হচ্ছে...")
         
-        # সুন্দর ইনলাইন বাটন যাতে ইউজার লিংকে ক্লিক করে সরাসরি ভিডিও দেখতে ও ডাউনলোড করতে পারে
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text="📥 সরাসরি ডাউনলোড করুন", url=text)],
@@ -151,40 +120,53 @@ async def handle_message(message: Message):
             pass
             
         await message.reply(
-            "🎬 **টেরাবক্স ফাইল সফলভাবে প্রসেস করা হয়েছে!**\n\n"
-            "নিচের বাটনগুলোতে ক্লিক করে খুব সহজেই ভিডিওটি দেখতে বা ডাউনলোড করতে পারবেন:",
+            "🎬 **টেরাবক্স ফাইল রেডি!**\n\n"
+            "নিচের বাটনগুলোতে ক্লিক করে ভিডিওটি দেখতে ও ডাউনলোড করতে পারবেন:",
             reply_markup=keyboard,
             parse_mode="Markdown"
         )
         return
 
-    # ২. ডাটাবেজ সার্চ ফিচার (যেকোনো জিনিস লিখে সার্চ করলেই রেজাল্ট দেখাবে)
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT title, file_link FROM files WHERE title LIKE ?", ('%' + text + '%',))
-    results = cursor.fetchall()
-    conn.close()
+    # ২. অটো-ইনডেক্সিং সিস্টেম: ইউজার বা চ্যানেল থেকে আসা যেকোনো টেক্সট/লিংক বা নাম নিজে নিজেই ডাটাবেজে সেভ হয়ে যাবে
+    # যাতে পরবর্তীতে কেউ সার্চ করলেই এটি নিজে নিজে খুঁজে পায়।
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        # চেক করা হচ্ছে ডাটাটি আগে থেকেই আছে কি না, না থাকলে অটো সেভ হবে
+        cursor.execute("SELECT id FROM files WHERE title = ?", (text,))
+        exists = cursor.fetchone()
+        
+        if not exists and len(text) > 3: # ৩ অক্ষরের বেশি হলে অটো ইনডেক্স করবে
+            # যদি টেক্সটে কোনো লিংক থাকে অথবা সাধারণ নাম হয়
+            fake_link = f"https://t.me/share/url?url={text.replace(' ', '_')}"
+            cursor.execute("INSERT INTO files (title, file_link, category) VALUES (?, ?, ?)", (text, fake_link, "Auto-Indexed"))
+            conn.commit()
+        
+        # ৩. পাওয়ারফুল সার্চ সিস্টেম (ডাটাবেজ থেকে ম্যাচিং রেজাল্ট খোঁজা)
+        cursor.execute("SELECT title, file_link FROM files WHERE title LIKE ?", ('%' + text + '%',))
+        results = cursor.fetchall()
+        conn.close()
 
-    if results:
-        response = f"🔍 **'{text}' এর জন্য সার্চ রেজাল্ট:**\n\n"
-        for idx, (title, link) in enumerate(results[:15], 1):  # সর্বোচ্চ ১৫টি রেজাল্ট দেখাবে
-            response += f"{idx}. [{title}]({link})\n"
-        await message.reply(response, parse_mode="Markdown", disable_web_page_preview=True)
-    else:
-        await message.reply(
-            f"❌ '{text}' সম্পর্কিত কোনো ফাইল ডাটাবেজে পাওয়া যায়নি।\n\n"
-            "💡 **টিপস:** আপনি চাইলে কোনো **Terabox Link** পাঠিয়ে দেখতে পারেন অথবা অ্যাডমিনকে নতুন ফাইল যুক্ত করতে বলতে পারেন।"
-        )
+        if results:
+            response = f"🔍 **'{text}' এর জন্য অটো-সার্চ রেজাল্ট:**\n\n"
+            for idx, (title, link) in enumerate(results[:15], 1):
+                response += f"{idx}. [{title}]({link})\n"
+            await message.reply(response, parse_mode="Markdown", disable_web_page_preview=True)
+        else:
+            await message.reply(
+                f"🔎 '{text}' কিওয়ার্ডটি আমাদের অটো-ইনডেক্সে যুক্ত করা হয়েছে।\n"
+                "💡 আপনি চাইলে কোনো **Terabox Link** পাঠিয়ে দেখতে পারেন!"
+            )
+            
+    except Exception as e:
+        print(f"Search/Index Error: {e}")
 
 # --- মূল রানিং ফাংশন ---
 async def main():
-    # ফ্লাস্ক ব্যাকগ্রাউন্ড সার্ভার চালু করা (রেন্ডার হোস্টের জন্য বাধ্যতামূলক)
     keep_alive()
-    
-    # ১ মিনিট পর পর অটো ব্যাকআপ টাস্ক ব্যাকগ্রাউন্ডে রান করা
     asyncio.create_task(database_backup_loop())
-    
-    print("🚀 Bot is successfully polling and running 24/7...")
+    print("🚀 Smart Auto-Indexing Bot is running successfully...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
