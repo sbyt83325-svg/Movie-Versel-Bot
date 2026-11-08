@@ -1,30 +1,29 @@
-# -------------------------------------------------------------------
-#  Production-ready Telegram Bot (aiogram 3.x + Flask + Render)
-#  Features: Auto-indexed search, Terabox downloader, Backup loop
-# -------------------------------------------------------------------
 import asyncio
 import logging
 import os
 import re
 import shutil
-import threading
 from datetime import datetime
 
 import aiosqlite
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from flask import Flask, request, jsonify
-from terabox_downloader import TeraboxDL  # pip install terabox-downloader
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiohttp import web
+from terabox_downloader import TeraboxDL
 
 # -------------------------------------------------------------------
 #  Configuration
 # -------------------------------------------------------------------
-BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8751100050:AAF4Vunr7OT-H0WZySy4p6UH16Cyt693gsI")
 ADMIN_ID = int(os.getenv("ADMIN_ID", 7718164345))
+# Make sure this environment variable is set in Render, e.g., https://my-bot.onrender.com
+WEBHOOK_BASE_URL = os.getenv("WEBHOOK_URL", "https://your-service.onrender.com")
 WEBHOOK_PATH = "/webhook"
-WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://your-service.onrender.com") + WEBHOOK_PATH
-TERABOX_COOKIE = os.getenv("TERABOX_COOKIE", "")  # required for Terabox
+WEBHOOK_URL = f"{WEBHOOK_BASE_URL}{WEBHOOK_PATH}"
+
+TERABOX_COOKIE = os.getenv("TERABOX_COOKIE", "") 
 
 DB_PATH = "bot_database.db"
 BACKUP_DIR = "backups"
@@ -34,18 +33,16 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # -------------------------------------------------------------------
-#  Bot & Dispatcher
+#  Bot & Dispatcher Initialization
 # -------------------------------------------------------------------
 bot = Bot(token=BOT_TOKEN, parse_mode="HTML")
 dp = Dispatcher()
 
 # -------------------------------------------------------------------
-#  Database (SQLite + FTS5 for full-text search)
+#  Database Setup (SQLite + FTS5)
 # -------------------------------------------------------------------
 async def init_db():
-    """Create the main table and the FTS5 index."""
     async with aiosqlite.connect(DB_PATH) as db:
-        # Main table – stores every indexed item
         await db.execute("""
             CREATE TABLE IF NOT EXISTS items (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,17 +51,15 @@ async def init_db():
                 title TEXT,
                 content TEXT,
                 link TEXT,
-                kind TEXT DEFAULT 'file',   -- file | video | channel | group
+                kind TEXT DEFAULT 'file',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        # FTS5 virtual table for fast keyword search
         await db.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS items_fts USING fts5(
                 title, content, link, content='items', content_rowid='id'
             )
         """)
-        # Triggers to keep FTS in sync
         await db.execute("""
             CREATE TRIGGER IF NOT EXISTS items_ai AFTER INSERT ON items BEGIN
                 INSERT INTO items_fts(rowid, title, content, link)
@@ -80,15 +75,7 @@ async def init_db():
         await db.commit()
         logger.info("✅ Database initialised.")
 
-async def index_item(
-    chat_id: int,
-    message_id: int,
-    title: str,
-    content: str = "",
-    link: str = "",
-    kind: str = "file",
-):
-    """Insert a new item into the database (auto-indexed)."""
+async def index_item(chat_id: int, message_id: int, title: str, content: str = "", link: str = "", kind: str = "file"):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             """INSERT INTO items (chat_id, message_id, title, content, link, kind)
@@ -98,7 +85,6 @@ async def index_item(
         await db.commit()
 
 async def search_items(query: str, limit: int = 20):
-    """Full-text search using FTS5. Returns list of matching rows."""
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             """SELECT i.id, i.title, i.link, i.kind
@@ -109,8 +95,7 @@ async def search_items(query: str, limit: int = 20):
                LIMIT ?""",
             (query, limit),
         )
-        rows = await cursor.fetchall()
-        return rows
+        return await cursor.fetchall()
 
 # -------------------------------------------------------------------
 #  Terabox Handler
@@ -118,11 +103,8 @@ async def search_items(query: str, limit: int = 20):
 TERABOX_PATTERN = re.compile(r"(terabox|teraboxapp)", re.IGNORECASE)
 
 async def handle_terabox_link(message: types.Message, link: str):
-    """Process a Terabox link and send download / stream buttons."""
     if not TERABOX_COOKIE:
-        await message.reply(
-            "⚠️ Terabox কুকি সেট করা হয়নি। অনুগ্রহ করে অ্যাডমিনকে জানান।"
-        )
+        await message.reply("⚠️ Terabox কুকি সেট করা হয়নি। অনুগ্রহ করে অ্যাডমিনকে জানান।")
         return
 
     terabox = TeraboxDL(TERABOX_COOKIE)
@@ -138,21 +120,12 @@ async def handle_terabox_link(message: types.Message, link: str):
         return
 
     download_link = info.get("download_link", "")
-    stream_link = info.get("stream_link") or download_link  # fallback
+    stream_link = info.get("stream_link") or download_link
 
-    # ---------- Inline Keyboard ----------
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="📥 সরাসরি ডাউনলোড করুন", url=download_link
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="▶️ অনলাইন ভিডিও দেখুন", url=stream_link
-                )
-            ],
+            [InlineKeyboardButton(text="📥 সরাসরি ডাউনলোড করুন", url=download_link)],
+            [InlineKeyboardButton(text="▶️ অনলাইন ভিডিও দেখুন", url=stream_link)],
         ]
     )
 
@@ -168,7 +141,6 @@ async def handle_terabox_link(message: types.Message, link: str):
 # -------------------------------------------------------------------
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
-    """Welcome message with interactive menu."""
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="📂 সব ফাইল", callback_data="cat_all")],
@@ -187,7 +159,6 @@ async def cmd_start(message: types.Message):
 
 @dp.callback_query(F.data.startswith("cat_"))
 async def handle_category(callback: types.CallbackQuery):
-    """Handle category button presses."""
     category = callback.data.split("_")[1]
     if category == "terabox":
         await callback.message.answer(
@@ -195,7 +166,6 @@ async def handle_category(callback: types.CallbackQuery):
             "অনুগ্রহ করে একটি Terabox লিঙ্ক পাঠান (যেমন: https://www.terabox.app/s/... )"
         )
     else:
-        # Show a few recent items from the selected category
         async with aiosqlite.connect(DB_PATH) as db:
             cursor = await db.execute(
                 "SELECT title, link FROM items WHERE kind = ? ORDER BY id DESC LIMIT 10",
@@ -205,16 +175,13 @@ async def handle_category(callback: types.CallbackQuery):
         if not rows:
             await callback.message.answer("📭 এই ক্যাটাগরিতে কোনো আইটেম নেই।")
         else:
-            text = "\n".join(
-                f"{i+1}. <a href='{row[1]}'>{row[0]}</a>" for i, row in enumerate(rows)
-            )
+            text = "\n".join(f"{i+1}. <a href='{row[1]}'>{row[0]}</a>" for i, row in enumerate(rows))
             await callback.message.answer(f"<b>{category.capitalize()} আইটেম:</b>\n{text}")
 
     await callback.answer()
 
 @dp.message(Command("search"))
 async def cmd_search(message: types.Message):
-    """Search the indexed database."""
     query = message.text.replace("/search", "").strip()
     if not query:
         await message.reply("🔍 অনুগ্রহ করে একটি কীওয়ার্ড দিন। উদাহরণ: <code>/search movie</code>")
@@ -225,41 +192,24 @@ async def cmd_search(message: types.Message):
         await message.reply("❌ কোনো ফলাফল পাওয়া যায়নি।")
         return
 
-    # Build a clean numbered list with Markdown links
-    lines = []
-    for idx, (_, title, link, kind) in enumerate(rows, start=1):
-        lines.append(f"{idx}. <a href='{link}'>{title}</a> <i>({kind})</i>")
-
-    await message.reply(
-        f"<b>🔎 সার্চ ফলাফল – “{query}”</b>\n\n" + "\n".join(lines),
-        disable_web_page_preview=True,
-    )
+    lines = [f"{idx}. <a href='{link}'>{title}</a> <i>({kind})</i>" for idx, (_, title, link, kind) in enumerate(rows, start=1)]
+    await message.reply(f"<b>🔎 সার্চ ফলাফল – “{query}”</b>\n\n" + "\n".join(lines), disable_web_page_preview=True)
 
 @dp.message()
 async def auto_index(message: types.Message):
-    """
-    Auto-index every message that contains a URL or meaningful text.
-    Also detects Terabox links and triggers the downloader.
-    """
     text = message.text or message.caption or ""
     if not text:
         return
 
-    # ---------- Terabox detection ----------
     if TERABOX_PATTERN.search(text):
-        # Extract the first URL from the message
         urls = re.findall(r"https?://\S+", text)
         if urls:
             await handle_terabox_link(message, urls[0])
             return
 
-    # ---------- Auto-indexing ----------
-    # Extract title (first line or first 100 chars)
     title = text.split("\n")[0][:100]
-    # Extract first URL as the link
     link_match = re.search(r"https?://\S+", text)
     link = link_match.group(0) if link_match else ""
-    # Determine kind based on content
     kind = "file"
     if "video" in text.lower() or "movie" in text.lower():
         kind = "video"
@@ -277,19 +227,16 @@ async def auto_index(message: types.Message):
     logger.info(f"📥 Indexed: {title[:50]}")
 
 # -------------------------------------------------------------------
-#  Automated Backup Loop (every 60 seconds)
+#  Automated Backup Loop
 # -------------------------------------------------------------------
 async def backup_loop():
-    """Copy the database, send it to admin, then delete the copy."""
     while True:
         await asyncio.sleep(60)  # 1 minute
         try:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             backup_path = os.path.join(BACKUP_DIR, f"bot_database_{timestamp}.db")
-            # Create a safe copy
             shutil.copy2(DB_PATH, backup_path)
 
-            # Send document to admin
             with open(backup_path, "rb") as f:
                 await bot.send_document(
                     chat_id=ADMIN_ID,
@@ -297,58 +244,54 @@ async def backup_loop():
                     caption=f"🗄️ ডেটাবেস ব্যাকআপ\n⏰ {timestamp}",
                 )
 
-            # Remove the local backup file to save space
             os.remove(backup_path)
-            logger.info(f"✅ Backup sent and local copy removed: {backup_path}")
+            logger.info(f"✅ Backup sent: {backup_path}")
         except Exception as exc:
             logger.exception("Backup failed")
 
 # -------------------------------------------------------------------
-#  Flask Web Server (Render port binding + Webhook endpoint)
+#  Startup/Shutdown Webhook Logic
 # -------------------------------------------------------------------
-app = Flask(__name__)
-
-# Create an event loop in a background thread for aiogram
-bot_loop = asyncio.new_event_loop()
-asyncio.set_event_loop(bot_loop)
-
-def run_bot_loop():
-    bot_loop.run_forever()
-
-threading.Thread(target=run_bot_loop, daemon=True).start()
-
-@app.route(WEBHOOK_PATH, methods=["POST"])
-def webhook():
-    """Receive updates from Telegram and feed them to aiogram."""
-    update_data = request.get_json(force=True)
-    update = types.Update(**update_data)
-    # Schedule the coroutine on the bot's event loop
-    asyncio.run_coroutine_threadsafe(
-        dp.feed_update(bot, update), bot_loop
-    )
-    return jsonify({"status": "ok"})
-
-@app.route("/")
-def health():
-    return "Bot is running!", 200
-
-# -------------------------------------------------------------------
-#  Startup – set webhook & launch background tasks
-# -------------------------------------------------------------------
-async def on_startup():
+async def on_startup(bot: Bot):
     await init_db()
-    # Start the backup loop
+    # Start the backup loop inside the main event loop
     asyncio.create_task(backup_loop())
-    # Set the webhook
-    await bot.set_webhook(WEBHOOK_URL)
+    # Set Webhook
+    await bot.set_webhook(WEBHOOK_URL, drop_pending_updates=True)
     logger.info(f"🚀 Webhook set to {WEBHOOK_URL}")
 
-# Schedule startup on the bot loop
-asyncio.run_coroutine_threadsafe(on_startup(), bot_loop)
+async def on_shutdown(bot: Bot):
+    await bot.delete_webhook()
+    logger.info("🛑 Webhook deleted")
 
 # -------------------------------------------------------------------
-#  Entry point (Render will run this file)
+#  Main Entry Point (aiohttp Web Server for Render)
 # -------------------------------------------------------------------
-if __name__ == "__main__":
+def main():
+    # Create the aiohttp web application
+    app = web.Application()
+
+    # Set up the webhook request handler
+    webhook_requests_handler = SimpleRequestHandler(
+        dispatcher=dp,
+        bot=bot,
+    )
+    webhook_requests_handler.register(app, path=WEBHOOK_PATH)
+
+    # Set up startup and shutdown hooks
+    dp.startup.register(on_startup)
+    dp.shutdown.register(on_shutdown)
+    setup_application(app, dp, bot=bot)
+
+    # Route for Render health check
+    app.router.add_get("/", lambda r: web.Response(text="Bot is running!"))
+
+    # Bind to Render's assigned PORT (default is 10000)
     port = int(os.getenv("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    logger.info(f"🌐 Starting web server on port {port}...")
+    
+    # Run the web application (This blocks the main thread, which is correct for Render)
+    web.run_app(app, host="0.0.0.0", port=port)
+
+if __name__ == "__main__":
+    main()
