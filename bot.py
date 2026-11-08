@@ -16,15 +16,16 @@ ADMIN_ID = 7718164345  # আপনার অ্যাডমিন চ্যা�
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# --- ফ্লাস্ক সার্ভার (Render Web Service কে ২৪/৭ সচল রাখার জন্য) ---
+# --- ফ্লাস্ক ওয়েব সার্ভার (Render Web Service কে ২৪/৭ সচল রাখার জন্য) ---
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "🤖 Master Telegram Search & Terabox Bot is running 24/7 on Render!"
+    return "🤖 Telegram Smart Search & Terabox Bot is running 24/7 as a Web Service!"
 
 def run_flask():
-    port = int(os.environ.get("PORT", 8080))
+    # Render-এর ওয়েব সার্ভিসের জন্য ডায়নামিক পোর্ট বাইন্ডিং
+    port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
 def keep_alive():
@@ -71,7 +72,7 @@ async def database_backup_loop():
                     caption=(
                         f"⚙️ **অটো ডাটাবেজ ব্যাকআপ রিপোর্ট:**\n"
                         f"🕒 সময়: `{timestamp}`\n"
-                        f"✅ ব্যাকআপ ফাইল সফলভাবে পাঠানো হয়েছে।"
+                        f"✅ ব্যাকআপ ফাইল সফলভাবে আপনার আইডিতে পাঠানো হয়েছে।"
                     ),
                     parse_mode="Markdown"
                 )
@@ -95,7 +96,6 @@ async def start_handler(message: Message):
         "👇 নিচে থেকে ক্যাটাগরি সিলেক্ট করুন অথবা সরাসরি সার্চ করুন:"
     )
     
-    # ইউজার ইন্টারফেসে অপশন বাটন বা মেনু
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -187,9 +187,13 @@ async def handle_auto_index_and_search(message: Message):
 
 # --- মূল রানিং ফাংশন ---
 async def main():
+    # ফ্লাস্ক ব্যাকগ্রাউন্ড সার্ভার চালু করা যাতে রেন্ডার ওয়েব সার্ভিস পোর্ট পায়
     keep_alive()
+    
+    # ব্যাকআপ লুপ চালু করা
     asyncio.create_task(database_backup_loop())
-    print("🚀 Master Bot is running successfully with zero errors...")
+    
+    print("🚀 Master Web Service Bot is running successfully 24/7...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
